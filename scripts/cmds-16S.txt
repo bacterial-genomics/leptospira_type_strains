@@ -1,0 +1,38 @@
+cmds-16S.txt
+
+
+# Fetch all RefSeq assemblies
+./fetch-assemblies.bash
+
+# Extract just the 16S rRNA locus tags from each GenBank RefSeq file with BioPython
+python ~/genomics_scripts/extract.record.from.genbank.py \
+  -f rRNA \
+  -u locus_tag \
+  -q B1C82_RS00230 \
+  -i GCF_002150035.1_ASM215003v1_genomic.gbff \
+  -o B1C82_RS0023016S.fa
+
+cd $HOME/Lepto/2022_Book_Chapter_Update/from_NCBI/16S_from_nuccore_refseq
+
+ml conda muscle
+source activate bpy2
+
+# Merge all individual 16S sequence files into a single FastA
+zcat *.fa.gz > merged.fas
+
+# Align the nucleotide sequences
+muscle -in merged.fasta -out merged.fasta.aln -maxhours 2
+
+# Form simpler names since all are version 1
+sed -i 's/\.1//g' merged.fasta.aln
+
+# manually verify with GUI the alignment looks good and no incorrect (non-16S) sequences included
+ml clustalx
+clustalx merged.fasta.aln
+
+# Form phylip file format since FastA not supported for RAxML
+python ~/scripts/fasta2phylip.py merged.fasta.aln merged.fasta.aln.phy
+source deactivate
+
+# Run RAxML for phytree
+qsub 16S.make_phylotree.bash
