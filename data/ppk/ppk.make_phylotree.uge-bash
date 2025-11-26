@@ -1,0 +1,60 @@
+#!/bin/bash -l
+
+
+#$ -q all.q 
+#$ -q short.q
+#$ -pe smp 16-128
+#$ -N lepto_phytree
+#$ -e /scicomp/groups-pure/OID/NCEZID/DHCPP/BSPB/ZSAL/.cgul-playground/leptospira_type_strains/data/job.err
+#$ -o /scicomp/groups-pure/OID/NCEZID/DHCPP/BSPB/ZSAL/.cgul-playground/leptospira_type_strains/data/job.out
+
+cd /scicomp/groups-pure/OID/NCEZID/DHCPP/BSPB/ZSAL/.cgul-playground/leptospira_type_strains/data/ppk
+
+# Create the phylotree
+module load raxml/8.2.12
+
+# 1k trees
+raxmlHPC-PTHREADS \
+  -s merged.fa.aln.phy \
+  -n topology \
+  -# 100 \
+  -p 65432 \
+  -f d \
+  -j \
+  -m GTRGAMMA \
+  --JC69 \
+  --no-bfgs \
+  -T "${NSLOTS}"
+rm *.RUN.*
+
+# 1k bootstraps
+raxmlHPC-PTHREADS \
+	-s merged.fa.aln.phy \
+	-n boots \
+	-N 100 \
+	-p 65432 \
+	-x 54321 \
+	-f a \
+	-m GTRGAMMA \
+	--JC69 \
+	--no-bfgs \
+	-T "${NSLOTS}"
+
+# Overlay bootstraps onto the best tree topology file
+raxmlHPC-PTHREADS \
+  -n final \
+  -t RAxML_bestTree.topology \
+  -z RAxML_bootstrap.boots \
+  -f b \
+  -m GTRGAMMA \
+  --JC69
+
+# Confirm enough bootstraps performed
+raxmlHPC-PTHREADS \
+	-m GTRCAT \
+	--JC69 \
+	-p 65432 \
+	-I autoMRE \
+	-z RAxML_bootstrap.boots \
+	-n test \
+	> Test_Summary.txt
