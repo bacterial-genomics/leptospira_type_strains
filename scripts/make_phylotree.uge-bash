@@ -1,0 +1,63 @@
+#!/bin/bash -l
+
+
+#$ -q all.q 
+#$ -q short.q
+#$ -pe smp 16-128
+#$ -N lepto_phytree
+#$ -e $LAB_HOME/.cgul-playground/leptospira_type_strains/data/job.err
+#$ -o $LAB_HOME/.cgul-playground/leptospira_type_strains/data/job.out
+
+# Set several SGE/UGE environment variables
+source /opt/sge/default/common/settings.sh
+
+cd $LAB_HOME/.cgul-playground/leptospira_type_strains/data
+
+# Create the phylotree
+module load raxml/8.2.12
+
+# 1k trees
+raxmlHPC-PTHREADS \
+  -s merged.fa.aln.phy \
+  -n topology \
+  -# 1000 \
+  -p 65432 \
+  -f d \
+  -j \
+  -m GTRGAMMA \
+  --JC69 \
+  --no-bfgs \
+  -T "${NSLOTS}"
+rm *.RUN.*
+
+# 5k bootstraps
+raxmlHPC-PTHREADS \
+	-s merged.fa.aln.phy \
+	-n boots \
+	-N 5000 \
+	-p 65432 \
+	-x 54321 \
+	-f a \
+	-m GTRGAMMA \
+	--JC69 \
+	--no-bfgs \
+	-T "${NSLOTS}"
+
+# Overlay bootstraps onto the best tree topology file
+raxmlHPC-PTHREADS \
+  -n final \
+  -t RAxML_bestTree.topology \
+  -z RAxML_bootstrap.boots \
+  -f b \
+  -m GTRGAMMA \
+  --JC69
+
+# Confirm enough bootstraps performed
+raxmlHPC-PTHREADS \
+	-m GTRCAT \
+	--JC69 \
+	-p 65432 \
+	-I autoMRE \
+	-z RAxML_bootstrap.boots \
+	-n test \
+	> Test_Summary.txt

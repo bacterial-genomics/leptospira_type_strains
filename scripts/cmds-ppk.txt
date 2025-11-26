@@ -1,0 +1,70 @@
+cmds-ppk.txt
+
+
+# Fetch the ppk rRNA gene sequence FastA files from NCBI
+module load miniconda
+conda activate bpy2
+
+while IFS=$'\t' read -r taxon locus; do
+    [ -z "$locus" ] && continue
+
+    # Taxon in TSV already looks like Leptospira_ognonensis
+    species=$(echo "$taxon" | awk '{print $1 "_" $2}')
+
+    # Find the matching GenBank file:
+    # e.g. Leptospira_ognonensis_GCF_004770745.1.gbk
+    gbk_file=""
+    for f in "${species}"_GCF_*.gbk; do
+        if [ -e "$f" ]; then
+            gbk_file="$f"
+            break
+        fi
+    done
+    if [ -z "$gbk_file" ]; then
+        echo "ERROR: No GBK file found for taxon ${species} (expected ${species}_GCF_*.gbk)" >&2
+        continue
+    fi
+
+    outfile="${species}_${locus}.fasta"
+    echo "Extracting locus_tag ${locus} from ${gbk_file} -> ${outfile}"
+    python ~/genomics_scripts/extract.record.from.genbank.py \
+        -f CDS \
+        -u locus_tag \
+        -q "$locus" \
+        -i "$gbk_file" \
+        -o "$outfile"
+done < <(grep '^Leptospira' ppk-locus_tag-from-RefSeq.tsv | tr -d '\r')
+
+
+
+# Rename headers the same as the filenames
+for f in *.fasta; do
+    header="${f%.fasta}"
+    sed -i "1s|^>.*$|>${header}|" "$f"
+done
+pigz *.fasta
+
+
+# Merge all individual 16S sequence files into a single FastA
+zcat *.fasta.gz > merged.fas
+
+
+# Align the nucleotide sequences
+module load muscle/5.3
+muscle -align merged.fas -output merged.fa.aln
+
+
+# manually verify with GUI the alignment looks good and no incorrect (non-ppk) sequences included
+module load clustalx/2.1
+clustalx merged.fa.aln
+
+
+# Form phylip file format since FastA not supported for RAxML
+module load miniconda
+conda activate bpy2
+python ~/scripts/fasta2phylip.py merged.fa.aln merged.fasta.aln.phy
+conda deactivate
+
+
+# Run RAxML for phytree
+qsub ppk.make_phylotree.bash

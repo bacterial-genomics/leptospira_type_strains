@@ -1,38 +1,65 @@
 cmds-16S.txt
 
 
-# Fetch all RefSeq assemblies
-./fetch-assemblies.bash
+# Fetch the 16S rRNA gene sequence FastA files from NCBI
+module load entrez/24.7
 
-# Extract just the 16S rRNA locus tags from each GenBank RefSeq file with BioPython
-python ~/genomics_scripts/extract.record.from.genbank.py \
-  -f rRNA \
-  -u locus_tag \
-  -q B1C82_RS00230 \
-  -i GCF_002150035.1_ASM215003v1_genomic.gbff \
-  -o B1C82_RS0023016S.fa
+while IFS=$'\t' read -r taxon acc; do
+    [ -z "$acc" ] && continue
+    species=$(echo "${taxon}" | awk '{print $1"_"$2}')
+    outfile="${species}_${acc}.fasta"
 
-cd $HOME/Lepto/2022_Book_Chapter_Update/from_NCBI/16S_from_nuccore_refseq
+    if [[ "$acc" == *.* ]]; then
+        #############################
+        # GenBank-style accession
+        #############################
+        echo "Downloading ${taxon} genbank accession ${acc} ..."
+        efetch -db nuccore -id "$acc" -format fasta > "$outfile"
+    elif [[ "$acc" == *_* ]]; then
+        #############################
+        # locus_tag: need to search
+        #############################
+        echo "Downloading ${taxon} locus_tag accession ${acc} ..."
+        # Resolve locus_tag to a nuccore record
+        esearch -db nuccore -query "${acc}[All Fields]" \
+         | efetch -format fasta -stop 1 > "$outfile"
+    else
+        echo "ERROR: Unrecognized ID format: ${acc} (neither accession nor locus_tag?)" >&2
+        exit 1
+    fi
 
-ml conda muscle
-source activate bpy2
+    sleep 3s
+done < <(grep '^Leptospira' 16S-rRNA-gene-accessions.tsv)
+
+
+# Rename headers the same as the filenames
+for f in *.fasta; do
+    header="${f%.fasta}"
+    sed -i "1s|^>.*$|>${header}|" "$f"
+done
+pigz *.fasta
+
 
 # Merge all individual 16S sequence files into a single FastA
-zcat *.fa.gz > merged.fas
+zcat *.fasta.gz > merged.fas
+
 
 # Align the nucleotide sequences
-muscle -in merged.fasta -out merged.fasta.aln -maxhours 2
+module load muscle/5.3
+muscle -align merged.fas -output merged.fa.aln
 
-# Form simpler names since all are version 1
-sed -i 's/\.1//g' merged.fasta.aln
 
 # manually verify with GUI the alignment looks good and no incorrect (non-16S) sequences included
-ml clustalx
+module load clustalx/2.1
 clustalx merged.fasta.aln
 
+
 # Form phylip file format since FastA not supported for RAxML
+module load miniconda
+conda activate bpy2
 python ~/scripts/fasta2phylip.py merged.fasta.aln merged.fasta.aln.phy
-source deactivate
+conda deactivate
+
 
 # Run RAxML for phytree
 qsub 16S.make_phylotree.bash
