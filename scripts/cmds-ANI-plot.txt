@@ -1,0 +1,139 @@
+cmds-ANI-plot.txt
+
+
+awk -F $'\t' \
+  'BEGIN {OFS = FS} {print $1,$2,$4}' \
+  ANI.Summary.tsv \
+  | grep -v Bidirectional_ANI \
+  > ANI.twowayonly.tab
+python ~/my_github_scripts/pairwiseTo2d.py \
+  --infile ANI.twowayonly.tab \
+  > ANI.matrix.twoway.tab
+sed -i 's/-/100/g' ANI.matrix.twoway.tab
+perl -p -i -e 's/\t\n/\n/g' ANI.matrix.twoway.tab
+
+# Create VirtualEnv for R phylogenetics
+ml miniconda
+mamba create \
+ -n Rphylo \
+ -c bioconda -c conda-forge \
+ r-ape=3.3 r-cluster=2.0.3 r-dendextend=1.1.2 r-dplyr=0.4.3 r-ggplot2=1.0.1 r-gplots=2.17.0 r-igraph=1.0.1 r-seqinr=3.1_3 r-vegan=2.3_4 r-yaml=2.1.13 -y
+
+# Open R and get libraries loaded in
+conda activate Rphylo
+R
+library(dendextend)
+library(gplots)
+library(RColorBrewer)
+par(cex.main=0.75)
+
+## Helper: format labels as "G. species (GCF_###)" with italics
+format_ani_labels <- function(x) {
+  # pattern: Genus_species_GCF_########
+  pat <- "^([A-Za-z]+)_([A-Za-z0-9]+)_(GCF_[0-9]+)$"
+  
+  m <- regexec(pat, x)
+  parts <- regmatches(x, m)
+  
+  out <- character(length(x))
+  
+  for (i in seq_along(x)) {
+    # parts[[i]]: whole, genus, species, accession
+    if (length(parts[[i]]) == 4) {
+      genus <- parts[[i]][2]
+      species <- parts[[i]][3]
+      acc <- parts[[i]][4]
+      
+      short_genus <- paste0(substr(genus, 1, 1), ".")  # G. abbreviation
+      
+      # italic('G. species')~~'(<acc>)'
+      out[i] <- sprintf("italic('%s %s')~~'(%s)'", short_genus, species, acc)
+    } else {
+      # fallback: use raw label, quoted, no italics
+      out[i] <- sprintf("'%s'", x[i])
+    }
+  }
+  
+  parse(text = out)
+}
+
+## The colors
+myCol <- c('grey90', 'grey80', 'grey65', 'grey45', 'gray25', 'black')
+## Defining breaks for the color scale
+myBreaks <- c(70, 80, 85, 90, 95, 99, 100)
+
+# read in data
+ani=read.table('ANI.matrix.twoway.tab', header=T, sep='\t', row.names=1, check.names=FALSE)
+
+# calc distances from %identities, and UPGMA "average" linkage for pairwise distance matrix
+ani.dist=dist(as.dist(100 - ani))
+ani.hclust=hclust(ani.dist, method="average")
+ani.dnd <- as.dendrogram(ani.hclust)
+# cluster colors
+cols_branches <- c('saddlebrown', 'green4', 'darkmagenta', 'dodgerblue4')
+ani.dnd <- color_branches(ani.dnd, k=4, col=cols_branches)
+col_labels <- get_leaves_branches_col(ani.dnd)
+col_labels <- col_labels[order(order.dendrogram(ani.dnd))]
+# format sample names
+orig_labels <- labels(ani.dnd)
+# pattern: Genus_species_GCF_#########
+labCol_parsed <- format_ani_labels(colnames(ani))
+labRow_parsed <- format_ani_labels(rownames(ani))
+# -------------------------------------------------------
+# plot it
+pdf('ANI_Fig.pdf')
+heatmap.2(as.matrix(ani), col=myCol, distfun=dist,
+    density.info=c('none'), key.title='',
+    key.xlab='Identity [%]', key.ylab='',
+    labCol = labCol_parsed,
+    labRow = labCol_parsed,
+    breaks=myBreaks, trace='none', margins=c(12, 12),
+    cexCol=-0.25 + 1/log10(2 * ncol(ani)),
+    cexRow=-0.25 + 1/log10(2 * nrow(ani)),
+    srtCol = 45,
+    main='Average Nucleotide Identity', key=FALSE)
+legend('topleft', xjust=0, cex=0.7, fill=myCol,
+    title='Bidirectional Identity [%]',
+    inset=c(0.00025,0.005),
+    legend=c('< 70', '80 - 85', '85 - 90', '90 - 95', '95 - 99', '> 99'))
+dev.off()
+
+pdf('ANI_Fig.Clusters.pdf')
+heatmap.2(as.matrix(ani), col=myCol, distfun=dist,
+    density.info=c('none'), key.title='',
+    key.xlab='Identity [%]', key.ylab='',
+    labCol = labCol_parsed,
+    labRow = labCol_parsed,
+    breaks=myBreaks, trace='none', margins=c(12, 12),
+    cexCol=-0.25 + 1/log10(2 * ncol(ani)),
+    cexRow=-0.25 + 1/log10(2 * nrow(ani)),
+    main='Average Nucleotide Identity', key=FALSE,
+    RowSideColors=col_labels, colRow=col_labels,
+    srtCol=45)
+legend('topleft', xjust=0, cex=0.7, fill=myCol,
+    title='Bidirectional Identity [%]',
+    inset=c(0.0005,0.005),
+    legend=c('< 70', '80 - 85', '85 - 90', '90 - 95', '95 - 99', '> 99'))
+dev.off()
+
+svg('ANI_Fig.Clusters.svg')
+heatmap.2(as.matrix(ani), col=myCol, distfun=dist,
+    density.info=c('none'), key.title='',
+    key.xlab='Identity [%]', key.ylab='',
+    labCol = labCol_parsed,
+    labRow = labCol_parsed,
+    breaks=myBreaks, trace='none', margins=c(12, 12),
+    cexCol=-0.25 + 1/log10(2 * ncol(ani)),
+    cexRow=-0.25 + 1/log10(2 * nrow(ani)),
+    main='Average Nucleotide Identity', key=FALSE,
+    RowSideColors=col_labels, colRow=col_labels,
+    srtCol=45)
+legend('topleft', xjust=0, cex=0.7, fill=myCol,
+    title='Bidirectional Identity [%]',
+    inset=c(0.0005,0.005),
+    legend=c('< 70', '80 - 85', '85 - 90', '90 - 95', '95 - 99', '> 99'))
+dev.off()
+
+
+q('no')
+conda deactivate
